@@ -1,2 +1,2 @@
 # Sulfur-Cycling
-Modelling, atmospheric flux calculations, + more
+Modelling, atmospheric flux calculations + more
