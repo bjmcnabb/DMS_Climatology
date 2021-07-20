@@ -1,4 +1,4 @@
-Scripts included here generate a summertime DMS climatology for the NE Subarctic Pacific (NESAP), using ensembled random forest regression and artificial neural network algorithms. 
+Scripts included here generate a boreal summertime DMS climatology for the NE Subarctic Pacific (NESAP), using ensembled random forest regression and artificial neural network algorithms. 
 
 All DMS data can be found in the NOAA PMEL repository (https://saga.pmel.noaa.gov/dms/). For a full list of predictor data used, see "Satellite_Data_Processing_NESAP.ipynb".
 
