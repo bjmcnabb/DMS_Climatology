@@ -8,3 +8,5 @@ The "Taylordiagram.py" script includes functions to generate a Taylor Diagram (T
 - includes functionality that enables a legend and text boxes to be added to the figure.
 - changes the correlation tick values/locations.
 - changes the reference point to a gold star and increases it's size.
+
+Relevant publication: McNabb & Tortell (\itin review.)
