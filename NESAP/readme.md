@@ -9,4 +9,4 @@ The "Taylordiagram.py" script includes functions to generate a Taylor Diagram (T
 - changes the correlation tick values/locations.
 - changes the reference point to a gold star and increases it's size.
 
-Relevant publication: McNabb & Tortell. Improved Prediction of Dimethyl Sulfide (DMS) Distributions in the NE Subarctic Pacific using Machine Learning Algorithms. *Biogeosciences, in review*.
+Relevant publication: McNabb & Tortell. Improved Prediction of Dimethyl Sulfide (DMS) Distributions in the NE Subarctic Pacific using Machine Learning Algorithms. *Biogeosciences (in review)*.
