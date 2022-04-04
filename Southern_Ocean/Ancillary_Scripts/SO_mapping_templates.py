@@ -50,7 +50,7 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
     data : DataFrame, optional
         A multiindex column dataframe with a specified index of "datetime", "latbins", and "lonbins". The default is None.
     plottype : bool, optional
-        Choose whether to plot data as a colored grid ("mesh" = pcolormesh) or filled contours ("contour" = contourf). The default is 'mesh'.
+        Choose whether to plot data as a colored grid ("mesh" = pcolormesh), contours ("contour"), filled contours ("contourf") or scatter plots ("scatter"). The default is 'mesh'.
     cmap : str, optional
         A matplotlib colormap. The default is 'viridis'.
     vmin : float, optional
