@@ -1,1 +1,1 @@
-Browse subfolders for scripts producing regional DMS climatolgies.
+Browse these subfolders for code producing regional DMS climatologies.
