@@ -1,4 +1,4 @@
-Scripts included here generate a boreal summertime DMS climatology for the Southern Ocean, using ensembled random forest regression and artificial neural network algorithms.
+Scripts included here generate a boreal summertime DMS climatology for the Southern Ocean, using ensembled random forest regression (RFR) and artificial neural network algorithms (ANN).
 
 The main scripts include: 
 * SO_DMS_build_models.py: main script processing/interpolating data and building the RFR and ANN ensembles.
