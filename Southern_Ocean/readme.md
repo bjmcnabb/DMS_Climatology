@@ -2,7 +2,7 @@ Scripts included here generate a boreal summertime DMS climatology for the South
 
 The main scripts include: 
 * SO_DMS_build_models.py: main script processing/interpolating data and building the RFR and ANN ensembles.
-* SO_DMS_analysis.py: main script for analysis, with code computing flux calculations and generating figures
+* SO_DMS_analysis.py: main script for analysis, with code computing flux calculations and generating figures.
 
 See "Ancillary_Scripts" for subfunctions producing processing steps applied to predictor data, sea-air flux calculations, the neural network design, and mapping templates. 
 
