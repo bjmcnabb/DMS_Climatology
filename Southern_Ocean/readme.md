@@ -1,3 +1,5 @@
+![DMS_timeseries](https://user-images.githubusercontent.com/68400556/161632729-ea3d16f0-6fb3-42ef-9225-02924b90f293.gif)
+
 Scripts included here generate a boreal summertime DMS climatology for the Southern Ocean, using ensembled random forest regression and artificial neural network algorithms.
 
 The main scripts include: 
