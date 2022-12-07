@@ -41,7 +41,7 @@ ice_shelves = shpreader.Reader('C:/Users/bcamc/OneDrive/Desktop/Python/Projects/
 ice_shelves_edges = shpreader.Reader('C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/ice_shapefiles/ne_10m_antarctic_ice_shelves_lines/ne_10m_antarctic_ice_shelves_lines.shp')
 #-----------------------------------------------------------------------------
 # Mapping template:
-def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=10, levels=100, norm=None, extend=None, s=None, colors=None):
+def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=10, levels=100, norm=None, extend=None, s=None, colors=None, marker=',', edgecolor='None', lw=1):
     """
     Plots a polar map of the Southern Ocean (<40oS) on a single axis.
 
@@ -89,16 +89,6 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
         map_proj._threshold /= 100
         # main plots
         ax = fig.add_subplot(gs[0,0], projection=map_proj)
-
-    # add features
-    ax.add_feature(ShapelyFeature(ice_shelves.geometries(),
-                                    ccrs.PlateCarree(), facecolor='aliceblue', edgecolor='black', zorder=1))
-    ax.add_feature(ShapelyFeature(glaciers.geometries(),
-                                    ccrs.PlateCarree(), facecolor='lightblue', edgecolor='black', zorder=1))
-    ax.add_feature(ShapelyFeature(ice_shelves_edges.geometries(),
-                                    ccrs.PlateCarree(), facecolor='azure', edgecolor='black', zorder=1))
-    ax.add_feature(cartopy.feature.LAND, edgecolor='None', facecolor='darkgray', zorder=2)
-    ax.add_feature(cartopy.feature.COASTLINE, edgecolor='k', zorder=2)
     
     # plot data
     if data is None:
@@ -115,6 +105,7 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
                             norm=norm,
                             extend=extend,
                             transform=ccrs.PlateCarree())
+            h.set_edgecolor("face")
         elif plottype=='contour':
             h = ax.contour(data.columns.values,
                            data.index.get_level_values('latbins').values,
@@ -125,6 +116,7 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
                            colors=colors,
                            cmap=None,
                            transform=ccrs.PlateCarree())
+            h.set_edgecolor("face")
         elif plottype=='mesh':
             h = ax.pcolormesh(data.columns.values,
                               data.index.get_level_values('latbins').values,
@@ -134,6 +126,7 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
                               vmin = vmin, vmax = vmax,
                               norm=norm,
                               transform=ccrs.PlateCarree())
+            h.set_edgecolor("face")
         elif plottype=='scatter':
             h = ax.scatter(x=data.stack(dropna=False).index.get_level_values('lonbins').values,
                            y=data.stack(dropna=False).index.get_level_values('latbins').values,
@@ -142,7 +135,19 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
                            cmap=cmap,
                            vmin = vmin, vmax = vmax,
                            norm=norm,
+                           marker=marker,
                            transform=ccrs.PlateCarree())
+     
+    # add features
+    ax.add_feature(ShapelyFeature(ice_shelves.geometries(),
+                                  ccrs.PlateCarree(), facecolor='aliceblue', edgecolor='black', linewidth=lw, zorder=1))
+    ax.add_feature(ShapelyFeature(glaciers.geometries(),
+                                      ccrs.PlateCarree(), facecolor='lightblue', edgecolor='black', linewidth=lw, zorder=1))
+    ax.add_feature(ShapelyFeature(ice_shelves_edges.geometries(),
+                                      ccrs.PlateCarree(), facecolor='azure', edgecolor='black', linewidth=lw, zorder=1))
+    ax.add_feature(cartopy.feature.LAND, edgecolor='None', facecolor='darkgray', linewidth=lw, zorder=2)
+    ax.add_feature(cartopy.feature.COASTLINE, edgecolor='k', linewidth=lw, zorder=2)
+
     
     ax.set_extent([-180,180,-90,-30], crs=ccrs.PlateCarree())
     # Create a circular map frame bounded by radius of map extent:
@@ -157,16 +162,16 @@ def South_1ax_map(ax=None, data=None, plottype='mesh', cmap=None, vmin=0, vmax=1
     
     # add gridlines
     gl = ax.gridlines(draw_labels=True,
-                      lw=3,
+                      linewidth=lw,
                       color="silver",
                       y_inline=True,
                       xlocs=range(-180,180,30),
                       ylocs=range(-80,91,10),
                       zorder=50,
                       )
-    return h, ax
+    return h, ax, gl
 
-def South_1ax_flat_map(ax=None, data=None, plottype='mesh', cmap='viridis', vmin=0, vmax=10, levels=100, cm=180, extent=None, norm=None, extend=None):
+def South_1ax_flat_map(ax=None, data=None, plottype='mesh', cmap='viridis', vmin=0, vmax=10, levels=100, cm=180, extent=None, norm=None, extend=None, lw=1):
     """
     Plots a PlateCarree map of the Southern Ocean (<40oS) on a single axis.
 
@@ -210,7 +215,7 @@ def South_1ax_flat_map(ax=None, data=None, plottype='mesh', cmap='viridis', vmin
         ax = fig.add_subplot(gs[0,0], projection=ccrs.PlateCarree(central_longitude=cm))
     #-----------------------------------------------------------------------------
     # Plot measured DMS
-    gl = ax.gridlines(draw_labels=True)
+    gl = ax.gridlines(draw_labels=True, linewidth=lw)
     gl.top_labels = False
     gl.right_labels = False
     if extent is None:
@@ -220,13 +225,13 @@ def South_1ax_flat_map(ax=None, data=None, plottype='mesh', cmap='viridis', vmin
 
     # add features
     ax.add_feature(ShapelyFeature(ice_shelves.geometries(),
-                                    ccrs.PlateCarree(), facecolor='aliceblue', edgecolor='black', zorder=1))
+                                    ccrs.PlateCarree(), facecolor='aliceblue', edgecolor='black', linewidth=lw, zorder=1))
     ax.add_feature(ShapelyFeature(glaciers.geometries(),
-                                    ccrs.PlateCarree(), facecolor='lightblue', edgecolor='black', zorder=1))
+                                    ccrs.PlateCarree(), facecolor='lightblue', edgecolor='black', linewidth=lw, zorder=1))
     ax.add_feature(ShapelyFeature(ice_shelves_edges.geometries(),
-                                    ccrs.PlateCarree(), facecolor='azure', edgecolor='black', zorder=1))
-    ax.add_feature(cartopy.feature.LAND, edgecolor='None', facecolor='darkgray', zorder=2)
-    ax.add_feature(cartopy.feature.COASTLINE, edgecolor='k', zorder=2)
+                                    ccrs.PlateCarree(), facecolor='azure', edgecolor='black', linewidth=lw, zorder=1))
+    ax.add_feature(cartopy.feature.LAND, edgecolor='None', facecolor='darkgray', linewidth=lw, zorder=2)
+    ax.add_feature(cartopy.feature.COASTLINE, edgecolor='k', linewidth=lw, zorder=2)
     
     if data is None:
         h = None

@@ -31,10 +31,11 @@ class TaylorDiagram(object):
         * srange: stddev axis extension, in units of *refstd*
         * extend: extend diagram to negative correlations
         * normalize: configure ticks if refstd is normalized to 1
+        * ms: reference marker (gold star) size
     """
      
     def __init__(self, refstd,
-                 fig=None, rect=111, label='_', srange=(0, 1.25), extend=False, normalize=False):
+                 fig=None, rect=111, label='_', srange=(0, 1.25), extend=False, normalize=False, ms=2, lw=1, mew=0.5):
         """
         Set up Taylor diagram axes, i.e. single quadrant polar
         plot, using `mpl_toolkits.axisartist.floating_axes`.
@@ -48,6 +49,7 @@ class TaylorDiagram(object):
         * srange: stddev axis extension, in units of *refstd*
         * extend: extend diagram to negative correlations
         * normalize: configure ticks to normalize refstd to 1
+        * ms: reference marker (gold star) size
         """
 
         from matplotlib.projections import PolarAxes
@@ -140,10 +142,10 @@ class TaylorDiagram(object):
 
         # Add reference point and stddev contour
         l, = self.ax.plot([0], self.refstd, mec='k', mfc='gold', marker='*',
-                          ls='', ms=25, label=label, zorder=100, clip_on=False)
+                          ls='', ms=ms, mew=mew, label=label, zorder=100, clip_on=False)
         t = NP.linspace(0, self.tmax)
         r = NP.zeros_like(t) + self.refstd
-        self.ax.plot(t, r, 'k--', label='_')
+        self.ax.plot(t, r, 'k--', label='_', lw=lw)
 
         # Collect sample points for latter use (e.g. legend)
         self.samplePoints = [l]
@@ -188,7 +190,7 @@ class TaylorDiagram(object):
         rs, ts = NP.meshgrid(NP.linspace(self.smin, self.smax),
                              NP.linspace(0, self.tmax))
         # Compute centered RMS difference
-        rms = NP.sqrt((self.refstd*self.norm_to)**2 + rs**2 - 2*self.refstd*self.norm_to*rs*NP.cos(ts))
+        rms = NP.sqrt((self.refstd)**2 + rs**2 - 2*self.refstd*rs*NP.cos(ts))
         
         contours = self.ax.contour(ts, rs, rms, levels, **kwargs)
 
