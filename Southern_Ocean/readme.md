@@ -9,5 +9,5 @@ See "Ancillary_Scripts" for subfunctions producing processing steps applied to p
 All observational DMS data can be found in the NOAA PMEL repository (https://saga.pmel.noaa.gov/dms/).
 
 Relevant publication: McNabb & Tortell. Physical Controls on Southern Ocean Dimethyl Sulfide (DMS) Distributions Revealed by Machine Learning Algorithms (2022). Limnology and Oceanography, in review.
-&nbsp;
+<br />
 ![DMS_timeseries](https://user-images.githubusercontent.com/68400556/161633959-1ebbbef7-d62e-46d0-a7e0-d35cf432577e.gif)
