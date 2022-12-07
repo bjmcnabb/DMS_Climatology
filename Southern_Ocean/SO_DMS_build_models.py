@@ -19,45 +19,31 @@ Created on Wed Aug  4 09:28:55 2021
 import timeit
 analysis_start = timeit.default_timer()
 #%% Import Packages
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import scipy
-from scipy.stats.stats import pearsonr, spearmanr
-import cartopy
-import cartopy.crs as ccrs
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mpl_toolkits.mplot3d import Axes3D
+from scipy.stats import pearsonr
 import xarray as xr
-from sklearn.decomposition import PCA
 import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
 from sklearn import metrics
-from datetime import datetime
-import datetime
-import seaborn as sns
 import dask.array as da
-import dask.dataframe as dd
-import shapely.vectorized
 import cartopy.io.shapereader as shpreader
-import fiona
-import shapely
 import shapely.geometry as sgeom
 from shapely.ops import unary_union
 from shapely.prepared import prep
-import joblib
-from obspy.geodetics import kilometers2degrees, degrees2kilometers
+from obspy.geodetics import kilometers2degrees
 import torch
-from torch.utils.data import DataLoader, TensorDataset
-from tqdm import tqdm
+from torch import nn
+
 import torchensemble
 from torchensemble.utils.logging import set_logger
 from torchensemble.utils import io
-import cmocean
+from torch.utils.data import DataLoader, TensorDataset
 
 # Progress bar package
 from tqdm import tqdm
@@ -65,9 +51,7 @@ from tqdm import tqdm
 # Import pre-built mapping functions
 from SO_mapping_templates import South_1ax_map, South_1ax_flat_map
 # import the custom-built neural network base model
-from NN_model_frameworks import ANNRegressor
-# Import taylor diagram script
-from taylorDiagram import TaylorDiagram
+from NN_model_frameworks import ANNRegressor, ANNEnsembler
 
 #%% Switch Directories
 dir_ = 'C:\\Users\\bcamc\\OneDrive\\Desktop\\Python\\Projects\\sulfur\\southern_ocean\\Scripts'
@@ -79,30 +63,45 @@ if os.getcwd() != dir_:
 #### Spatial grid resolution (degrees):
 grid = kilometers2degrees(20)
 
-#### call file directory
-write_dir = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/SO_DMS_data_v2'
-
 #### Define lat/lon constraints
 min_lon, max_lon, min_lat, max_lat = -180, 180, -90, -40
-
-#### Define destination to save figures
-save_to_path = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/Figures'
-
-#### Define a destination to load/save ensemble ANN models to
-ANN_save_dir = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/Scripts/'
-
-#### For iron stress-testing, set a new directory to save models to
-dir_new = 'C:\\Users\\bcamc\\OneDrive\\Desktop\\Python\\Projects\\sulfur\\southern_ocean\\Scripts\\ANN_with_FLH_chl'
 
 #### Define bins
 latbins = np.arange(min_lat,max_lat+grid,grid)
 lonbins = np.arange(min_lon,max_lon+grid,grid)
 
+#### call file directory
+write_dir = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/SO_DMS_data_v2'
+#### Define destination to save figures
+save_to_path = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/Figures'
+#### Define a destination to load/save ensemble ANN models to
+ANN_save_dir = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/Scripts/'
+#### For iron stress-testing, set a new directory to save models to
+dir_new = 'C:\\Users\\bcamc\\OneDrive\\Desktop\\Python\\Projects\\sulfur\\southern_ocean\\Scripts\\ANN_with_FLH_chl'
+
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ 
-#### Select whether this is the first run
-# NOTE: If true, tells script to interpolate data, build 1000 models ensembles,
-# and save output to file (v. time consuming!). If False, load up previous output.
-first_run = False
+#### Script flags
+# NOTE: If flags below are true, tells script to interpolate data, build all  
+# 2000 models, and save output to file (very time consuming!). 
+# If False, load up previous output.
+first_interpolation = False
+first_correlation = False
+first_build = False
+save_data = False
+
+#### DMS threshold flag
+# Flag determines if extreme DMS values should be removed from the training process
+remove_extreme_DMS = False
+extreme_threshold = 100 # concentration, in nM
+
+if remove_extreme_DMS is False:
+    ANN_name = 'ANN_remove_none'
+else:
+    ANN_name = f'ANN_remove_above_{extreme_threshold}'
+
+#### *** Force CPU use - CPU memory on my device is higher than GPU. Set line
+# below to True instead to use cuda, if Nvidia CUDA is available and preferable. ***
+cuda = False
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ 
 
 #%% Load PMEL data
@@ -129,8 +128,15 @@ print()
 # data_proc = PMEL.loc[:,['DateTime','Lat','Lon','swDMS','SST', 'SAL']].dropna()
 data_proc = PMEL.loc[:,['DateTime','Lat','Lon','swDMS','DMSPaq','DMSPp','DMSPt','sdepth']]
 
-# Filter out data below 10 m
+# Filter out data below 10 m depth
 data_proc = data_proc[data_proc['sdepth']<10]
+
+# Filter out extreme DMS values (optional)
+if remove_extreme_DMS is True:
+    points_removed = data_proc[data_proc['swDMS']>=extreme_threshold].size
+    proportion_removed = ((data_proc.size-data_proc[data_proc['swDMS']<=extreme_threshold].size)/data_proc.size)
+    data_proc = data_proc[data_proc['swDMS']<=extreme_threshold]
+    print(f"{points_removed}({proportion_removed:.2%}) DMS values above {extreme_threshold} nM removed")
 
 # Redefine columns as float data type to be readable by binning functions:
 data_proc['DateTime'] = pd.to_datetime(data_proc['DateTime']).values.astype('float64')
@@ -144,6 +150,8 @@ data_proc['DateTime'] = pd.to_datetime(data_proc['DateTime']).values.astype('flo
 to_bin = lambda x: np.round(x /grid) * grid
 data_proc['latbins'] = data_proc.Lat.map(to_bin)
 data_proc['lonbins'] = data_proc.Lon.map(to_bin)
+spatial_group_n = data_proc.groupby(['DateTime', 'latbins', 'lonbins']).ngroups
+spatial_group_size = data_proc.groupby(['DateTime', 'latbins', 'lonbins']).size().unique()
 data_proc = data_proc.groupby(['DateTime', 'latbins', 'lonbins']).mean()
 
 # Rename binned columns + drop mean lat/lons:
@@ -176,13 +184,6 @@ idx = np.arange(1,13,1)
 for i in idx:
     sizes.append((months[months==i].shape[0]/months.shape[0])*100)
 
-fig = plt.figure(figsize=(6,6))
-ax = fig.add_subplot(111)
-ax.bar(idx,sizes)
-ax.xaxis.set_ticks(idx)
-ax.set_xticklabels([var_months_[i] for i in idx], rotation=90)
-ax.set_ylabel('% Total Data')
-
 # Filter to restrict only to certain months
 data_proc = pd.concat([data_proc[(data_proc['datetime'].dt.month >= 10)],data_proc[(data_proc['datetime'].dt.month <= 4)]])
 
@@ -199,12 +200,17 @@ DMS = data_proc.pivot(index='datetime',columns=['latbins','lonbins'], values='sw
 DMSP = data_proc.pivot(index='datetime',columns=['latbins','lonbins'], values='DMSPt').reset_index()
 
 # bin rows into months
+temporal_group_n = DMS.groupby(DMS['datetime'].dt.strftime('%m')).ngroups
+temporal_group_size = DMS.groupby(DMS['datetime'].dt.strftime('%m')).size().unique()
 DMS = DMS.groupby(DMS['datetime'].dt.strftime('%m')).mean()
 DMSP = DMSP.groupby(DMSP['datetime'].dt.strftime('%m')).mean()
 
 # stack as a column dataframe, perserving coordinates with NaNs
 DMS = DMS.stack(['latbins'],dropna=False).stack(['lonbins'],dropna=False)
 DMSP =  DMSP.stack(['latbins'],dropna=False).stack(['lonbins'],dropna=False)
+
+print(f'spatial: num of groups={spatial_group_n}, n={spatial_group_size}')
+print(f'temporal: num of groups={temporal_group_n}, n={temporal_group_size}')
 
 #%% Load in Satellite Data
 #-----------------------------------------------------------------------------
@@ -323,9 +329,7 @@ var_months_ = {1:'January',
 
 #%% Handle interpolated data
 
-# first_run = False
-
-if first_run is True:
+if first_interpolation is True:
     # interpolate the data
     #--------------------------------------------------------------------------
     # set up list and dict for data
@@ -479,20 +483,21 @@ y = y.rename('DMS')
 
 # Select list of predictor variables to use in models
 predictor_vars_ = [
-    'CDOM',
     'MLD',
     'chl',
     'PAR',
-    # 'SRD',
     'SAL',
     'SSHA',
     'SSN',
-    'SST',
     'Si',
+    'ice',
+    'CDOM',
+    'SST',
     'wind',
+    
+    # 'SRD',
     # 'FLH_chl',
     # 'phi_corr',
-    'ice',
     # 'FSLE',
     ]
 
@@ -555,6 +560,7 @@ del bathy, model_input, vars_
 
 #%% Generate land/ice mask
 
+#### Generate mask
 # import the shapefiles - these are the files containing polygons for ice/land masses
 glaciers = shpreader.Reader('C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/ice_shapefiles/ne_10m_glaciated_areas/ne_10m_glaciated_areas.shp')
 ice_shelves = shpreader.Reader('C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/ice_shapefiles/ne_10m_antarctic_ice_shelves_polys/ne_10m_antarctic_ice_shelves_polys.shp')
@@ -576,13 +582,10 @@ to_mask = pd.Series(np.tile(to_mask, len(X_full.loc[:,'chl'].index.levels[0])), 
 # replace 1.0 (i.e land/ice) with nans to mask data
 to_mask = to_mask.replace(1.0,np.nan)
 
-#%% Mask out the full dataset for predictions
-
+#### Mask out the full dataset for predictions
 X_full = X_full.where(to_mask.notna(),np.nan).dropna()
 
 #%% Iron-stress proxy testing
-
-# first_run = True
 
 # Set directories to store ANN ensembles
 if 'FLH_chl' in X_full.columns.values:
@@ -591,7 +594,6 @@ if 'phi_corr' in X_full.columns.values:
     os.chdir(dir_new)
 
 #%% ANN - Build Artifical Neural Network ensemble
-
 ensemble_start = timeit.default_timer()
 
 #------------------------------------------------------------------------------
@@ -599,10 +601,15 @@ ensemble_start = timeit.default_timer()
 
 logger = set_logger('ensemble_test', use_tb_logger=True)
 
+if cuda is False:
+    use_cuda = False
+else:
+    use_cuda = True
+
 # Initiate ensemble
-ANN_ensemble = torchensemble.VotingRegressor(estimator=ANNRegressor(nfeatures=X_train.shape[1]),
+ANN_ensemble = torchensemble.VotingRegressor(estimator=ANNRegressor(nfeatures=X_train.shape[1], neurons=30, cuda=cuda),
                                             n_estimators=1000,
-                                            cuda=False,
+                                            cuda=use_cuda,
                                             n_jobs=-1,
                                             )
 
@@ -616,7 +623,7 @@ ANN_ensemble.set_scheduler('StepLR',
                         gamma=0.1)
 
 #### train or load ensemble
-if first_run is True:
+if first_build is True:
     #### Process Data into Tensors
     #------------------------------------------------------------------------------
     X_valtrain, X_val, y_valtrain, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=0)
@@ -652,7 +659,7 @@ if first_run is True:
                   epochs=100,
                   test_loader=val_dataloader,
                   save_model=True,
-                  # early_stopping_rounds=2,
+                  # early_stopping_rounds=5,
               )
     #### get final MSE
     mse = ANN_ensemble.evaluate(test_loader=test_dataloader)
@@ -680,17 +687,27 @@ ANN_y_pred = pd.Series(ANN_y_pred[:,0], index=X_full.index)
 
 #-----------------------------------------------------------------------------
 # Calculate stds, pearson correlations, and RMSEs for members in ANN ensemble:
-ANN_stds = np.std([ANN_ensemble[model].predict(X_test.values) for model in tqdm(range(len(ANN_ensemble)))],axis=1)
+np.random.seed(0)
+subset = 100
 
-ANN_corrcoefs = np.empty([len(ANN_ensemble)])
-for i, model in tqdm(enumerate(ANN_ensemble)):
-    rs = pearsonr(ANN_ensemble[i].predict(X_test.values), y_test.values)
+ANN_stds = np.std([ANN_ensemble.estimators_[model].predict(X_test.values) for model in tqdm(range(len(ANN_ensemble.estimators_)))],axis=1)
+ANN_stds_linear = np.std([np.sinh(ANN_ensemble.estimators_[model].predict(X_test.values)) for model in tqdm(range(len(np.random.choice(ANN_ensemble.estimators_,size=subset))))],axis=1)
+
+ANN_corrcoefs = np.empty([len(ANN_ensemble.estimators_)])
+for i, submodel in tqdm(enumerate(ANN_ensemble.estimators_)):
+    rs = pearsonr(submodel.predict(X_test.values), y_test.values)
     ANN_corrcoefs[i] = rs[0]
 
-ANN_rmses = np.empty([len(ANN_ensemble)])
-for i, model in tqdm(enumerate(ANN_ensemble)):
-    ANN_rmses[i] = np.sqrt(metrics.mean_squared_error(y_test, ANN_ensemble[i].predict(X_test.values)))
+ANN_corrcoefs_linear = np.empty([len(np.random.choice(ANN_ensemble.estimators_,size=subset))])
+for i, submodel in tqdm(enumerate(np.random.choice(ANN_ensemble.estimators_,size=subset))):
+    rs = pearsonr(np.sinh(submodel.predict(X_test.values)), np.sinh(y_test.values))
+    ANN_corrcoefs_linear[i] = rs[0]
 
+ANN_rmses = np.empty([len(ANN_ensemble.estimators_)])
+for i, submodel in tqdm(enumerate(ANN_ensemble.estimators_)):
+    ANN_rmses[i] = np.sqrt(metrics.mean_squared_error(y_test, submodel.predict(X_test.values)))
+    
+ANN_ensemble_linear_R2 = r2_score(np.sinh(y_test), np.sinh(ANN_ensemble.predict(X_test.values)))
 #-----------------------------------------------------------------------------
 # Get runtime
 ensemble_end= timeit.default_timer()
@@ -722,6 +739,138 @@ print("Testing accuracy (R^2): %0.3f" % ANN_ensemble_R2)
 print('~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~')
 print()
 #------------------------------------------------------------------------------
+
+
+#%% ANN - Build Artifical Neural Network ensemble
+
+# ensemble_start = timeit.default_timer()
+
+# #------------------------------------------------------------------------------
+# #### Train/fit or load ensemble
+
+# # Initiate model
+# base_model = ANNRegressor(nfeatures=X_train.shape[1], neurons=30, cuda=cuda)
+
+# # Set our optimizer function, dyanmic learning rate algorithm, and loss metric
+# optimizer = torch.optim.Adam(base_model.parameters(),
+#                               lr=1e-1,
+#                               weight_decay=1e-5,
+#                               eps=1e-9)
+# lambda1 = lambda epoch: 0.95 ** epoch
+# scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+
+# # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1) # adjust leraning rate dynamically
+
+# loss_fn = nn.MSELoss() # Regression uses mean squared error (MSE)
+# # loss_fn = nn.L1Loss()
+
+# # Input data
+# # NOTE: this should be scaled and obtained from train_test_split previously!
+# input_data = [X_train, y_train, X_test, y_test]
+
+# # Initiate ensemble
+# num_models=1000
+# ANN_ensemble = ANNEnsembler(base_estimator=base_model,
+#                             n_estimators=num_models,
+#                             optimizer=optimizer,
+#                             loss_fn=loss_fn,
+#                             scheduler=scheduler,
+#                             n_jobs=-1,
+#                             batch_size=256,
+#                             max_epochs=150,
+#                             patience=10,
+#                             tolerance=1e-4,
+#                             internal_testing=0.2,
+#                             early_stopping=False,
+#                             verbose=True,
+#                             cuda=cuda,
+#                             )
+
+# #### Train or load trained ensemble
+# if first_build is True:
+#     #### Fit ensemble
+#     ANN_ensemble.fit(input_data=input_data)
+
+#     pred = ANN_ensemble.predict(X_test.values)
+    
+#     # save model:
+#     ANN_ensemble.save_ensemble(ANN_save_dir, ANN_name)
+
+# else:
+#     # Load ensemble from disk
+#     ANN_ensemble.load_ensemble(ANN_save_dir, ANN_name)
+
+# #-----------------------------------------------------------------------------
+# # Calculate stds, pearson correlations, and RMSEs for members in ANN ensemble:
+# np.random.seed(0)
+# subset = 100
+
+# ANN_stds = np.std([ANN_ensemble.estimators_[model].predict(X_test.values) for model in tqdm(range(len(ANN_ensemble.estimators_)))],axis=1)
+# ANN_stds_linear = np.std([np.sinh(ANN_ensemble.estimators_[model].predict(X_test.values)) for model in tqdm(range(len(np.random.choice(ANN_ensemble.estimators_,size=subset))))],axis=1)
+
+# ANN_corrcoefs = np.empty([len(ANN_ensemble.estimators_)])
+# for i, submodel in tqdm(enumerate(ANN_ensemble.estimators_)):
+#     rs = pearsonr(submodel.predict(X_test.values), y_test.values)
+#     ANN_corrcoefs[i] = rs[0]
+
+# ANN_corrcoefs_linear = np.empty([len(np.random.choice(ANN_ensemble.estimators_,size=subset))])
+# for i, submodel in tqdm(enumerate(np.random.choice(ANN_ensemble.estimators_,size=subset))):
+#     rs = pearsonr(np.sinh(submodel.predict(X_test.values)), np.sinh(y_test.values))
+#     ANN_corrcoefs_linear[i] = rs[0]
+
+# ANN_rmses = np.empty([len(ANN_ensemble.estimators_)])
+# for i, submodel in tqdm(enumerate(ANN_ensemble.estimators_)):
+#     ANN_rmses[i] = np.sqrt(metrics.mean_squared_error(y_test, submodel.predict(X_test.values)))
+
+# #-----------------------------------------------------------------------------
+
+# #### Get accuracy of final ensemble
+# print('Rendering training predictions...')
+# ANN_y_train_pred = ANN_ensemble.predict(X_train.values)
+# print('Rendering testing predictions...')
+# ANN_y_test_pred = ANN_ensemble.predict(X_test.values)
+# ANN_train_R2 = r2_score(y_train, ANN_y_train_pred)
+# ANN_ensemble_R2 = r2_score(y_test, ANN_y_test_pred)
+# ANN_ensemble_linear_R2 = r2_score(np.sinh(y_test), np.sinh(ANN_ensemble.predict(X_test.values)))
+# print(f"Ensemble training accuracy: {ANN_train_R2*100:.2f}%")
+# print(f"Accuracy of ensemble: {ANN_ensemble_R2*100:.2f}%")
+
+# #### Run full predictions
+# print('Rendering final SO predictions...')
+# ANN_y_pred = ANN_ensemble.predict(scaler.transform(X_full))
+# ANN_y_pred = pd.Series(ANN_y_pred, index=X_full.index)
+# #-----------------------------------------------------------------------------
+# # Get runtime
+# ensemble_end= timeit.default_timer()
+# ANN_execution_time = ensemble_end-ensemble_start
+# #-----------------------------------------------------------------------------
+# #### Evaluate the model
+# print()
+# print('~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~')
+# print('       PyTorch ANN Model Results       ')
+# print('~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~')
+# print('\nExecution time:')
+# print(str(round(ANN_execution_time,5)),'seconds') 
+# print(str(round((ANN_execution_time)/60,5)),'mins')
+# print(str(round((ANN_execution_time)/3600,5)),'hrs')
+# print()
+# print('Model Configuration:')
+# print(base_model)
+# print()
+# print('Number of models in ensemble:',str(ANN_ensemble.n_estimators))
+# print('Mean Absolute Error (MAE):', round(metrics.mean_absolute_error(y_test, ANN_y_test_pred),4))
+# print('Mean Squared Error (MSE):', round(metrics.mean_squared_error(y_test, ANN_y_test_pred),4))
+# print('Root Mean Squared Error (RMSE):', round(np.sqrt(metrics.mean_squared_error(y_test, ANN_y_test_pred)),4))
+# # print('Mean Prediction Accuracy (100-MAPE):', round(accuracy, 2), '%')
+# ANN_ensemble_R2 = r2_score(y_test,ANN_y_test_pred)
+# print('Training Root Mean Squared Error (RMSE):', round(np.sqrt(metrics.mean_squared_error(y_train, ANN_y_train_pred)),4))
+# print("Training accuracy (R^2): %0.3f" % ANN_train_R2)
+# print('Testing Root Mean Squared Error (RMSE):', round(np.sqrt(metrics.mean_squared_error(y_test, ANN_y_test_pred)),4))
+# print("Testing accuracy (R^2): %0.3f" % ANN_ensemble_R2)
+# print('~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~')
+# print()
+# #------------------------------------------------------------------------------
+
 #%% RFR - Build RFR model
 #-----------------------------------------------------------------------------
 #### Define model
@@ -737,7 +886,7 @@ RFR_model = RandomForestRegressor(n_estimators=1000,
                                   n_jobs=-1, # use all core processors in computer (i.e. speed up computation)
                                   random_state=0,# this just seeds the randomization of the ensemble models each time
                                   bootstrap=True,
-                                  oob_score=False,
+                                  oob_score=True,
                                   verbose=False) 
 
 # fit the model to the training data
@@ -749,28 +898,34 @@ RFR_y_pred_test = RFR_model.predict(X_test.values)
 n_features = RFR_model.n_features_in_
 
 RFR_model_R2 = RFR_model.score(X_test.values,y_test.values)
+RFR_model_linear_R2 = r2_score(np.sinh(y_test), np.sinh(RFR_model.predict(X_test.values)))
 #-----------------------------------------------------------------------------
 #### Model prediction of DMS values
 RFR_y_pred = RFR_model.predict(scaler.transform(X_full)) 
 RFR_y_pred = pd.Series(RFR_y_pred,index=X_full.index, name='DMS')
 #-----------------------------------------------------------------------------
 #### Calcuate stds, pearson correlations for RFR trees in ensemble:
-
+np.random.seed(0)
+subset = 100
 RFR_stds = np.std([single_tree.predict(X_test.values) for single_tree in tqdm(RFR_model.estimators_)],axis=1)
+RFR_stds_linear = np.std([np.sinh(single_tree.predict(X_test.values)) for single_tree in tqdm(np.random.choice(RFR_model.estimators_,size=subset))],axis=1)
 
 RFR_corrcoefs = np.empty([len(RFR_model.estimators_)])
 for i, single_tree in tqdm(enumerate(RFR_model.estimators_)):
     rs = pearsonr(single_tree.predict(X_test.values), y_test.values)
     RFR_corrcoefs[i] = rs[0]
 
+RFR_corrcoefs_linear = np.empty([len(np.random.choice(RFR_model.estimators_,size=subset))])
+for i, single_tree in tqdm(enumerate(np.random.choice(RFR_model.estimators_,size=subset))):
+    rs = pearsonr(np.sinh(single_tree.predict(X_test.values)), np.sinh(y_test.values))
+    RFR_corrcoefs_linear[i] = rs[0]
+
 RFR_rmses = np.empty([len(RFR_model.estimators_)])
 for i, single_tree in tqdm(enumerate(RFR_model.estimators_)):
     RFR_rmses[i] = np.sqrt(metrics.mean_squared_error(y_test, single_tree.predict(X_test.values)))
 
-
 #-----------------------------------------------------------------------------
 end = timeit.default_timer() # stop the clock
-#### Evaluate the model
 print()
 print('~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~')
 print('             RFR Model Results         ')
@@ -795,67 +950,69 @@ print()
 #------------------------------------------------------------------------------
 
 #%% Combine both model's predictions
-if first_run == True:
-    # Load in data
-    export_dir = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/export_data/'
-    #-----------------------------------------------------------------------------
-    # Complie model predictions together
-    models_combined = pd.Series(np.nanmean(pd.concat([np.sinh(RFR_y_pred), np.sinh(ANN_y_pred)], axis=1),axis=1), index=RFR_y_pred.index, name='DMS')
-    #-----------------------------------------------------------------------------
-    # Create indices to subsample from full dataset
-    import random
-    random.seed(0) # for reproducibility
-    ind = random.sample(range(0,len(X_full)),5000)
-    #-----------------------------------------------------------------------------
-    # Compute SSHA gradients
-    var = 'SSHA'
-    grads=[]
-    for i in X_full.index.levels[0].values:
-        # Calculate dx & dy from the matrix of the variable for a single month
-        gradient = np.gradient(X_full.loc[i,var].unstack('lonbins'))
-        # Calculate the resultant vector
-        gradient = np.sqrt(gradient[0]**2+gradient[1]**2)
-        # Create a dataframe and stack back to a series
-        gradient = pd.DataFrame(gradient, 
-                                index=X_full.loc[i,var].unstack('lonbins').index,
-                                columns=X_full.loc[i,var].unstack('lonbins').columns).stack()
-        # Add back in a date index
-        gradient = gradient.reindex_like(X_full.loc[i,var])
-        gradient = gradient.reset_index()
-        gradient['datetime'] = np.tile(i,len(gradient))
-        gradient = gradient.set_index(['datetime','latbins','lonbins'])
-        gradient = gradient.squeeze('columns')
-        # Append final derivatives to list
-        grads.append(gradient)
-    dSSHA = pd.concat(grads)
-    var = 'SST'
-    grads=[]
-    for i in X_full.index.levels[0].values:
-        # Calculate dx & dy from the matrix of the variable for a single month
-        gradient = np.gradient(X_full.loc[i,var].unstack('lonbins'))
-        # Calculate the resultant vector
-        gradient = np.sqrt(gradient[0]**2+gradient[1]**2)
-        # Create a dataframe and stack back to a series
-        gradient = pd.DataFrame(gradient, 
-                                index=X_full.loc[i,var].unstack('lonbins').index,
-                                columns=X_full.loc[i,var].unstack('lonbins').columns).stack()
-        # Add back in a date index
-        gradient = gradient.reindex_like(X_full.loc[i,var])
-        gradient = gradient.reset_index()
-        gradient['datetime'] = np.tile(i,len(gradient))
-        gradient = gradient.set_index(['datetime','latbins','lonbins'])
-        gradient = gradient.squeeze('columns')
-        # Append final derivatives to list
-        grads.append(gradient)
-    dSST = pd.concat(grads)
-    del gradient, grads
-    #------------------------------------------------------------------------------
-    # Add in new predictors to run GP on
-    X_full_plus = X_full.copy()
-    X_full_plus['dSSHA'] = dSSHA.fillna(0)
-    X_full_plus['SRD'] = vars_interp['SRD'].reindex_like(X_full.loc[:,'chl'])
-    X_full_plus['currents'] = vars_interp['currents'].reindex_like(X_full.loc[:,'chl'])
-    #------------------------------------------------------------------------------
+export_dir = 'C:/Users/bcamc/OneDrive/Desktop/Python/Projects/sulfur/southern_ocean/export_data/'
+
+# Load in data
+#-----------------------------------------------------------------------------
+# Complie model predictions together
+models_combined = pd.Series(np.nanmean(pd.concat([np.sinh(RFR_y_pred), np.sinh(ANN_y_pred)], axis=1),axis=1), index=RFR_y_pred.index, name='DMS')
+#-----------------------------------------------------------------------------
+# Create indices to subsample from full dataset
+import random
+random.seed(0) # for reproducibility
+ind = random.sample(range(0,len(X_full)),5000)
+#-----------------------------------------------------------------------------
+# Compute SSHA gradients
+var = 'SSHA'
+grads=[]
+for i in tqdm(X_full.index.levels[0].values):
+    # Calculate dx & dy from the matrix of the variable for a single month
+    gradient = np.gradient(X_full.loc[i,var].unstack('lonbins'))
+    # Calculate the resultant vector
+    gradient = np.sqrt(gradient[0]**2+gradient[1]**2)
+    # Create a dataframe and stack back to a series
+    gradient = pd.DataFrame(gradient, 
+                            index=X_full.loc[i,var].unstack('lonbins').index,
+                            columns=X_full.loc[i,var].unstack('lonbins').columns).stack()
+    # Add back in a date index
+    gradient = gradient.reindex_like(X_full.loc[i,var])
+    gradient = gradient.reset_index()
+    gradient['datetime'] = np.tile(i,len(gradient))
+    gradient = gradient.set_index(['datetime','latbins','lonbins'])
+    gradient = gradient.squeeze('columns')
+    # Append final derivatives to list
+    grads.append(gradient)
+dSSHA = pd.concat(grads)
+var = 'SST'
+grads=[]
+for i in tqdm(X_full.index.levels[0].values):
+    # Calculate dx & dy from the matrix of the variable for a single month
+    gradient = np.gradient(X_full.loc[i,var].unstack('lonbins'))
+    # Calculate the resultant vector
+    gradient = np.sqrt(gradient[0]**2+gradient[1]**2)
+    # Create a dataframe and stack back to a series
+    gradient = pd.DataFrame(gradient, 
+                            index=X_full.loc[i,var].unstack('lonbins').index,
+                            columns=X_full.loc[i,var].unstack('lonbins').columns).stack()
+    # Add back in a date index
+    gradient = gradient.reindex_like(X_full.loc[i,var])
+    gradient = gradient.reset_index()
+    gradient['datetime'] = np.tile(i,len(gradient))
+    gradient = gradient.set_index(['datetime','latbins','lonbins'])
+    gradient = gradient.squeeze('columns')
+    # Append final derivatives to list
+    grads.append(gradient)
+dSST = pd.concat(grads)
+del gradient, grads
+#------------------------------------------------------------------------------
+# Add in new predictors to run GP on
+X_full_plus = X_full.copy()
+X_full_plus['dSSHA'] = dSSHA.fillna(0)
+X_full_plus['SRD'] = vars_interp['SRD'].reindex_like(X_full.loc[:,'chl'])
+X_full_plus['currents'] = vars_interp['currents'].reindex_like(X_full.loc[:,'chl'])
+#------------------------------------------------------------------------------
+#%% Save final climatologies as a NetCDF (and csv)
+if save_data == True:
     # Write data to files for easier test handling later
     ANN_y_pred.to_csv(export_dir+'ANN_y_pred.csv')
     RFR_y_pred.to_csv(export_dir+'RFR_y_pred.csv')
@@ -868,6 +1025,29 @@ if first_run == True:
     # X_full_plus.iloc[ind].to_csv(export_dir+'X_full_plus_subsample.csv')
     # models_combined.iloc[ind].to_csv(export_dir+'models_combined_subset.csv')
 
+    RFR_y_pred = RFR_y_pred.rename('RFR')
+    ANN_y_pred = ANN_y_pred.rename('ANN')
+    # write to netcdfs
+    xa1 = xr.Dataset.from_dataframe(np.sinh(RFR_y_pred).to_frame())
+    xa1['latbins'].attrs={'units':'degrees', 'long_name':'binned latitude at 20 km (0.18o) resolution'}
+    xa1['lonbins'].attrs={'units':'degrees', 'long_name':'binned longitude at 20 km (0.18o) resolution'}
+    xa1['datetime'].attrs={'units':'NaN', 'long_name':'month number'}
+    xa1.to_netcdf(export_dir[:-12]+'RFR_climatology.nc')
+    
+    xa2 = xr.Dataset.from_dataframe(np.sinh(ANN_y_pred).to_frame())
+    xa2['latbins'].attrs={'units':'degrees', 'long_name':'binned latitude at 20 km (0.18o) resolution'}
+    xa2['lonbins'].attrs={'units':'degrees', 'long_name':'binned longitude at 20 km (0.18o) resolution'}
+    xa2['datetime'].attrs={'units':'NaN', 'long_name':'month number'}
+    xa2.to_netcdf(export_dir[:-12]+'ANN_climatology.nc')
+    # merge
+    xa = xr.merge([xa1, xa2])
+    # add metadata
+    xa['latbins'].attrs={'units':'degrees', 'long_name':'binned latitude at 20 km (0.18o) resolution'}
+    xa['lonbins'].attrs={'units':'degrees', 'long_name':'binned longitude at 20 km (0.18o) resolution'}
+    xa['datetime'].attrs={'units':'NaN', 'long_name':'month number'}
+    # write to file
+    xa.to_netcdf(export_dir[:-12]+'SO_DMS_climatologies.nc')
+
 #%% Calculate build run time
 analysis_end = timeit.default_timer()
 analysis_runtime = analysis_end-analysis_start
@@ -875,3 +1055,20 @@ print('Analysis Runtime:')
 print(str(round(analysis_runtime,5)),'secs')
 print(str(round((analysis_runtime)/60,5)),'mins')
 print(str(round((analysis_runtime)/3600,5)),'hrs')
+
+#%%
+check = X[np.sinh(y)>=100]
+check.insert(loc=0, column='DMS', value=np.sinh(y)[np.sinh(y)>=100])
+check = check.reset_index()
+check = check.set_index(['datetime','latbins','lonbins','DMS'])
+check = check.sort_values(by='DMS')
+
+quantiles = pd.DataFrame()
+quantiles['min'] = X.min(axis=0)
+quantiles['5%'] = X.quantile(0.05, axis=0)
+quantiles['95%'] = X.quantile(0.95, axis=0)
+quantiles['max'] = X.max(axis=0)
+quantiles = quantiles.T
+
+print(check)
+print(quantiles)
