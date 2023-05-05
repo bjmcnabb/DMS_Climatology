@@ -9,6 +9,7 @@ Scripts here provide the following:
 * bin2D.py: simple function to bin 2D matrices, requiring the Pandas library 
 * interp2D.py: wrapper function around scipy's "RBF" and "griddata" interpolation functions, looped to iterate through the months of input DMS observational data
 * regrid_climatology.py: helper function calling bin2D.py and interp2D.py internally to upscale published DMS barnes interplolated climatologies, for comparison with 20 km resolution RFR and ANN predictions 
+* NSIDC_bin_sea_ice.py: code to convert raw datafiles NSIDC sea ice concentrations from polar sterographic to geodesic projections, and bin the data for later interpolation.
 
 #### PLEASE NOTE: The "taylorDiagram.py" script includes functions to generate a Taylor Diagram (Taylor, 2001). It is from the public domain and is NOT my creation - all credit goes to Yannick Copin (https://gist.github.com/ycopin/3342888). However, this version is included for compatability and is modified to do the following:
 
